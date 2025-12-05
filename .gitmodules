@@ -1,0 +1,3 @@
+[submodule "third_party/segmentation_models.pytorch"]
+	path = third_party/segmentation_models.pytorch
+	url = https://github.com/qubvel-org/segmentation_models.pytorch.git
