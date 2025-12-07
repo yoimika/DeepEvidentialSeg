@@ -1,10 +1,13 @@
+from typing import List, Set
 import torch
 import numpy as np
 from torchvision import transforms as T
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 
 # RUGD 数据集的标签颜色映射
 # 颜色格式为 RGB
-label_mapping = {
+label2color = {
     0: (0, 0, 0),  # void
     1: (108, 64, 20),  # dirt
     2: (255, 229, 204),  # sand
@@ -63,6 +66,7 @@ label2name = {
 
 
 def _channel_adjust(image: torch.Tensor) -> torch.Tensor:
+    # 将图像调整为 C x H x W 格式
     if isinstance(image, torch.Tensor) and image.dim() == 3:
         if image.shape[0] == 3:
             return image
@@ -87,6 +91,7 @@ def _random_crop(image: torch.Tensor, label: torch.Tensor) -> tuple:
     return image, label
 
 def image_transforms(image: object) -> object:
+    # 标准化图像
     transforms = T.Compose([
         T.ToTensor(),
         T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -95,6 +100,7 @@ def image_transforms(image: object) -> object:
     return _channel_adjust(output)
 
 def image_reverse_transforms(image: object) -> object:
+    # 反标准化图像
     inv_normalize = T.Normalize(
         mean=[-0.485 / 0.229, -0.456 / 0.224, -0.406 / 0.225],
         std=[1 / 0.229, 1 / 0.224, 1 / 0.225]
@@ -103,15 +109,14 @@ def image_reverse_transforms(image: object) -> object:
     output = torch.clamp(output, 0, 1)
     return _channel_adjust(output)
 
+def map_label_colors(label: torch.Tensor) -> torch.Tensor:
+    # 将 RGB 颜色映射到标签 ID
+    for id, color in label2color.items():
+        mask = (label == torch.tensor(color)).all(dim=-1)
+        label[mask] = id
+    return label
 
-def label_transforms(label: object) -> object:
-    def map_label_colors(label: torch.Tensor) -> torch.Tensor:
-        # 将 RGB 颜色映射到标签 ID
-        for id, color in label_mapping.items():
-            mask = (label == torch.tensor(color)).all(dim=-1)
-            label[mask] = id
-        return label
-    
+def label_transforms(label: object) -> object:    
     output = map_label_colors(torch.from_numpy(label)).long()
     output = _channel_adjust(output)
     if output.dim() == 3:
@@ -119,3 +124,34 @@ def label_transforms(label: object) -> object:
     else:
         return output[:, 0]
 
+def is_label_in_image(label: torch.Tensor, target_labels: Set[int]) -> bool:
+    # 检查图像中是否包含目标标签
+    unique_labels = torch.unique(label)
+    for t_label in target_labels:
+        if t_label in unique_labels:
+            return True
+    return False
+
+def visualize_with_legend(ax, mask, title, label2name=label2name):
+    # 1. Get unique classes present in this specific mask
+    unique_labels = np.unique(mask)
+    
+    # 2. Generate a colormap with enough colors for the max label index (25)
+    # using 'tab20' or 'jet' usually provides distinct colors
+    base_cmap = plt.get_cmap('tab20b', 25) 
+    
+    # 3. Plot the image
+    im = ax.imshow(mask, cmap=base_cmap, vmin=0, vmax=24)
+    ax.set_title(title)
+    
+    # 4. Create the legend handles manually
+    legend_patches = []
+    for label_idx in unique_labels:
+        if label_idx in label2name:
+            # Get the color corresponding to this label from the colormap
+            color = base_cmap(label_idx / 24.0) 
+            patch = mpatches.Patch(color=color, label=f"{label_idx}: {label2name[label_idx]}")
+            legend_patches.append(patch)
+    
+    # 5. Add legend to the side of the plot
+    ax.legend(handles=legend_patches, bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)

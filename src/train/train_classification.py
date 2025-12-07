@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from src.DeepEvidentialSeg import RUGDH5Dataset, DeepEvidentialSegModelConfig
+from src import RUGDH5Dataset, DeepEvidentialSegModelConfig
 import wandb
 from tqdm import tqdm
 
@@ -41,23 +41,23 @@ optim_grouped_parameters = [
 optim = torch.optim.AdamW(optim_grouped_parameters, weight_decay=1e-2)
 
 ## 设置学习率调度器
-warmup_epochs = 3 # 预热3个epoch，可以不要的（这个操作纯纯负优化）
-warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
-    optim,
-    start_factor=0.01,
-    total_iters=warmup_epochs, # 预热 $warmup_epochs 个epoch
-)
-main_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-    optim,
-    T_0=10,
-    T_mult=2, # 每次重启后周期倍增, 即10,20,40,...
-    eta_min=1e-6, # 最小学习率
-)
-scheduler = torch.optim.lr_scheduler.SequentialLR(
-    optim,
-    schedulers=[warmup_scheduler, main_scheduler],
-    milestones=[warmup_epochs],
-)
+# warmup_epochs = 3 # 预热3个epoch，可以不要的（这个操作纯纯负优化）
+# warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+#     optim,
+#     start_factor=0.01,
+#     total_iters=warmup_epochs, # 预热 $warmup_epochs 个epoch
+# )
+# main_scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+#     optim,
+#     T_0=10,
+#     T_mult=2, # 每次重启后周期倍增, 即10,20,40,...
+#     eta_min=1e-6, # 最小学习率
+# )
+# scheduler = torch.optim.lr_scheduler.SequentialLR(
+#     optim,
+#     schedulers=[warmup_scheduler, main_scheduler],
+#     milestones=[warmup_epochs],
+# )
 
 # 初始化WandB
 wandb.init(
@@ -91,7 +91,7 @@ for epoch in range(epochs):
                 'lr': optim.param_groups[0]['lr'],
             })
         tbar.set_postfix({'loss': loss.item()})
-    scheduler.step()
+    # scheduler.step()
     tbar.close()
     
 # 保存模型

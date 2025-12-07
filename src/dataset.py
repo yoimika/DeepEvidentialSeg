@@ -5,7 +5,7 @@ from PIL import Image
 from collections.abc import Sequence
 from typing import Callable
 from torchvision import transforms as T
-from .utils import _random_crop, image_transforms, label_transforms
+from utils import _random_crop, image_transforms, label_transforms
 
 
 class RUGDH5Dataset(Dataset):
@@ -13,7 +13,7 @@ class RUGDH5Dataset(Dataset):
             self, 
             h5_path: str, 
             image_transforms: Callable = image_transforms,
-            label_transforms: Callable = label_transforms,    
+            label_transforms: Callable = None,    
         ):
         self.h5_path = h5_path
         self.image_transforms = image_transforms
@@ -47,8 +47,8 @@ class RUGDH5Dataset(Dataset):
         # 2. 解码 (Decode)
         image = cv2.imdecode(img_bytes, cv2.IMREAD_COLOR_RGB) # BGR
         
-        # Label 通常是单通道 PNG
-        label = cv2.imdecode(lbl_bytes, cv2.IMREAD_COLOR_RGB)
+        # Label 通常是单通道图像
+        label = cv2.imdecode(lbl_bytes, cv2.IMREAD_UNCHANGED)
 
         # 3. 应用变换
         if self.image_transforms:
@@ -61,9 +61,8 @@ class RUGDH5Dataset(Dataset):
     
 if __name__ == '__main__':
     dataset = RUGDH5Dataset(
-        './data/rugd.h5',
+        './data/test.h5',
         image_transforms=image_transforms,
-        label_transforms=label_transforms
     )
 
     print(f"Dataset length: {len(dataset)}")

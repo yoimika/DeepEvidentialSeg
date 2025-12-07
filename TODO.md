@@ -10,10 +10,12 @@
 [x]: 先训练一版
 
 ## 其他东西
-[ ]: 把 transforms decoder 和 encoder 做好，方便后续调试
+[x]: 把 transforms decoder 和 encoder 做好，方便后续调试
 
-[ ]: 写一个可视化的 ipynb 方便查看后续模型的效果
+[x]: 写一个可视化的 ipynb 方便查看后续模型的效果
 
+[x]: 分好测试集和训练集.
 
-
+## Reconstruction
+[ ]: 添加重建部分
 
