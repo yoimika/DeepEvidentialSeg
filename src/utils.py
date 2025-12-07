@@ -1,4 +1,4 @@
-from typing import List, Set
+from typing import List, Literal, Optional, Set, Union
 import torch
 import numpy as np
 from torchvision import transforms as T
@@ -64,22 +64,47 @@ label2name = {
     24: 'picnic-table'
 }
 
+def torch2numpy(item: torch.Tensor) -> np.ndarray:
+    return item.cpu().numpy()
+def numpy2torch(item: np.ndarray) -> torch.Tensor:
+    return torch.from_numpy(item)
 
-def _channel_adjust(image: torch.Tensor) -> torch.Tensor:
-    # 将图像调整为 C x H x W 格式
-    if isinstance(image, torch.Tensor) and image.dim() == 3:
-        if image.shape[0] == 3:
-            return image
-        else:
-            return image.permute(2, 0, 1)  # HWC to CHW
+def _chw2hwc(image: torch.Tensor) -> torch.Tensor:
+    # tensor version 
+    *bs, c, h, w = image.shape
+    return image.permute(*bs, -2, -1, -3)  # C x H x W to H x W x C
+def _hwc2chw(image: torch.Tensor) -> torch.Tensor:
+    # tensor version 
+    *bs, h, w, c = image.shape
+    return image.permute(*bs, -1, -3, -2)  # H x W x C to C x H x W
+def chw2hwc(image: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:
+    if isinstance(image, torch.Tensor):
+        return _chw2hwc(image)
     else:
-        # Expect B x C x H x W
-        if image.shape[1] == 3:
-            return image
-        else:
-            return image.permute(0, 3, 1, 2)
+        return torch2numpy(_chw2hwc(numpy2torch(image)))
+def hwc2chw(image: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:
+    if isinstance(image, torch.Tensor):
+        return _hwc2chw(image)
+    else:
+        return torch2numpy(_hwc2chw(numpy2torch(image)))
+
+#HACK: 认为 3 就是 channel 维度
+is_hwc = lambda image: image.shape[-1] == 3
+is_chw = lambda image: image.shape[-3] == 3
+def auto2chw(image: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:
+    # 将图像调整为 CHW
+    if is_hwc(image): return hwc2chw(image)
+    return image
+def auto2hwc(image: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:
+    # 将图像调整为 HWC
+    if is_chw(image): return chw2hwc(image)
+    return image
 
 def _random_crop(image: torch.Tensor, label: torch.Tensor) -> tuple:
+    is_hwc_image = is_hwc(image)
+    if is_hwc_image:
+        image = hwc2chw(image)
+
     *_, H, W = image.shape
     crop_h, crop_w = H // 32 * 32, W // 32 * 32  # 确保裁剪尺寸是 32 的倍数
 
@@ -88,6 +113,9 @@ def _random_crop(image: torch.Tensor, label: torch.Tensor) -> tuple:
 
     image = image[..., start_h:start_h + crop_h, start_w:start_w + crop_w]
     label = label[..., start_h:start_h + crop_h, start_w:start_w + crop_w]
+    
+    if is_hwc_image:
+        image = chw2hwc(image)
     return image, label
 
 def image_transforms(image: object) -> object:
@@ -96,8 +124,9 @@ def image_transforms(image: object) -> object:
         T.ToTensor(),
         T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
+    image = auto2hwc(image)
     output = transforms(image)
-    return _channel_adjust(output)
+    return auto2chw(output)
 
 def image_reverse_transforms(image: object) -> object:
     # 反标准化图像
@@ -105,9 +134,10 @@ def image_reverse_transforms(image: object) -> object:
         mean=[-0.485 / 0.229, -0.456 / 0.224, -0.406 / 0.225],
         std=[1 / 0.229, 1 / 0.224, 1 / 0.225]
     )
+    image = auto2hwc(image)
     output = inv_normalize(image)
     output = torch.clamp(output, 0, 1)
-    return _channel_adjust(output)
+    return auto2chw(output)
 
 def map_label_colors(label: torch.Tensor) -> torch.Tensor:
     # 将 RGB 颜色映射到标签 ID
@@ -118,7 +148,7 @@ def map_label_colors(label: torch.Tensor) -> torch.Tensor:
 
 def label_transforms(label: object) -> object:    
     output = map_label_colors(torch.from_numpy(label)).long()
-    output = _channel_adjust(output)
+    output = auto2chw(output)
     if output.dim() == 3:
         return output[0]
     else:
@@ -155,3 +185,69 @@ def visualize_with_legend(ax, mask, title, label2name=label2name):
     
     # 5. Add legend to the side of the plot
     ax.legend(handles=legend_patches, bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
+
+def sample_patches(
+        images: torch.Tensor, 
+        features: torch.Tensor,
+        num_samples: int = 32,
+        patch_size: int = 60,
+        stride: int = 1,
+    ):
+    """
+    从对每个 batch 选取 num_samples 个点，找到对应的 patch，以及对应的 feature，返回 patch 和 feature， stride 表示缩放比例
+    NOTE: 这里假定 features 和 images 相同大小
+    """
+    if images.dim() == 3:
+        images.unsqueeze_(0)  # Add batch dimension
+    if features.dim() == 3:
+        features.unsqueeze_(0)  # Add batch dimension
+    *bs, C, H, W = images.shape
+    assert tuple(features.shape[:-3]) == tuple(bs), "Batch size of images and features must match."
+    images, features = images.flatten(0, -4), features.flatten(0, -4)
+    
+    # 检查 patch size 必须为偶数，方便后续操作。（其实为奇数也可以，但是为了方便计算这里强制为偶数）
+    assert patch_size % 2 == 0, "Patch size must be even."
+    half_patch = patch_size // 2
+
+    # Pad 图像以防止越界
+    images_padded = torch.nn.functional.pad(
+        images,
+        pad=(half_patch, half_patch, half_patch, half_patch),
+        mode='reflect'
+    )
+
+    batch_features = []
+    batch_patches = []
+    for b in range(sum(bs)):
+        feature = features[b]  # C x H x W
+
+        _, h, w = feature.shape
+        sampled_indices = np.random.choice(h * w, num_samples, replace=False)
+        
+        patches = []
+        feats = []
+        for idx in sampled_indices:
+            fh = idx // w
+            fw = idx % w
+
+            # 计算在原图上的中心点位置
+            center_h = fh * stride + stride // 2
+            center_w = fw * stride + stride // 2
+
+            # 计算 patch 的边界 + padding
+            top = center_h # center_h - half_patch + half_patch
+            bottom = center_h + half_patch + half_patch
+            left = center_w # center_w - half_patch + half_patch
+            right = center_w + half_patch + half_patch
+
+            patch = images_padded[b, :, top:bottom, left:right]
+            feat_vector = feature[:, fh, fw]
+
+            patches.append(patch)
+            feats.append(feat_vector)
+        
+        batch_patches.append(torch.stack(patches))  # num_samples x C x patch_size x patch_size
+        batch_features.append(torch.stack(feats))    # num_samples x C
+    
+    return torch.stack(batch_patches), torch.stack(batch_features)  # B x num_samples x ...
+
