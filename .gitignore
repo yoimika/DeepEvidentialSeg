@@ -1,9 +1,10 @@
 # Project specific files
+.vscode/
 data/
 checkpoints/
 tmp/
 tmp.py
-
+wandb/
 
 
 # Byte-compiled / optimized / DLL files
